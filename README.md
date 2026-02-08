@@ -1,0 +1,315 @@
+# Self-Modifying AI Agent
+
+A minimal AI agent that evolves itself through GitHub issues and pull requests.
+
+**⚠️ Run in isolated environment (sandbox/VM/Docker) - see Security section below**
+
+## 🌟 What This Does
+
+This agent:
+1. Monitors GitHub issues labeled `agent-task`
+2. Uses GPT-4o to generate shell scripts that modify its own code
+3. Creates pull requests with the proposed changes
+4. You review and merge to deploy new versions
+5. Process repeats - agent continuously evolves
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Python 3.8+
+- Git configured (`git config user.name` and `user.email` set)
+- OpenAI API key ([get one here](https://platform.openai.com/api-keys))
+- GitHub personal access token ([create here](https://github.com/settings/tokens))
+  - Required scopes: `repo` (full control)
+
+### Installation
+
+1. **Clone this repository**
+   ```bash
+   git clone https://github.com/YOUR-USERNAME/agent-seed.git
+   cd agent-seed
+   ```
+
+2. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Configure environment**
+   ```bash
+   cp .env.example .env
+   ```
+   
+   Edit `.env` with your credentials:
+   ```bash
+   OPENAI_API_KEY=sk-your-key-here
+   GITHUB_TOKEN=ghp_your-token-here
+   REPO=YOUR-USERNAME/agent-seed
+   ```
+
+4. **Create the `agent-task` label**
+   
+   On GitHub:
+   - Go to your repository
+   - Click "Issues" → "Labels"
+   - Click "New label"
+   - Name: `agent-task`
+   - Color: any color you prefer
+   - Save
+
+5. **Run the agent**
+   ```bash
+   python agent.py
+   ```
+   
+   You should see:
+   ```
+   🤖 Agent monitoring YOUR-USERNAME/agent-seed for 'agent-task' issues...
+   Press Ctrl+C to stop
+   ```
+
+### First Evolution
+
+Create a new issue on GitHub:
+- **Title**: `add logging to agent.log file`
+- **Labels**: `agent-task`
+- **Body**: (optional description)
+
+Within 30 seconds:
+- ✓ Agent detects the issue
+- ✓ Generates evolution script
+- ✓ Creates `agent_v1.py`
+- ✓ Tests the new version
+- ✓ Creates a pull request
+- ✓ Closes the issue
+
+Review the PR, then merge to deploy!
+
+## 📚 How It Works
+
+### Architecture
+
+```
+GitHub Issue → Agent Detects → GPT-4o Generates Script
+                                        ↓
+                                Create agent_vN.py
+                                        ↓
+                                Test New Version
+                                        ↓
+                           Create PR ← Pass? → Merge
+                                        ↓
+                                Switch to New Version
+```
+
+### Evolution Process
+
+1. **Detection**: Agent polls GitHub every 30 seconds
+2. **Generation**: GPT-4o creates a bash script to implement the task
+3. **Execution**: Script creates new agent version + any helper files
+4. **Testing**: New version runs `--test` flag to verify it works
+5. **PR Creation**: Git branch created, changes committed, PR opened
+6. **Human Review**: You review the changes
+7. **Deployment**: Merge PR → agent switches to new version
+
+### Why Shell Scripts?
+
+The agent generates **bash scripts** instead of directly modifying Python. This enables:
+- Creating multiple files (helpers, tests, configs)
+- Surgical changes (use `sed`, `awk` for targeted edits)
+- Complex operations (install packages, setup infrastructure)
+- Self-documenting evolution (git shows what changed)
+
+**Example evolution script:**
+```bash
+#!/bin/bash
+set -e
+
+# Copy agent as base
+cp agent.py agent_v1.py
+
+# Add logging import
+sed -i '3a import logging' agent_v1.py
+
+# Create logging module
+cat > logging_helper.py << 'EOF'
+import logging
+logging.basicConfig(filename='agent.log', level=logging.INFO)
+EOF
+
+chmod +x agent_v1.py
+echo "✓ Agent v1 ready"
+```
+
+## 🔄 Error Handling
+
+### Automatic Retries
+
+The agent automatically retries failed evolutions:
+- **Up to 3 attempts** per issue
+- Each retry gets context about previous failures
+- GPT-4o tries different approaches
+
+### Failed Issues
+
+If all attempts fail:
+- Issue stays **OPEN** (not auto-closed)
+- `agent-failed` label added
+- Comment posted explaining what happened
+
+**To retry manually:**
+1. Add `agent-retry` label to the failed issue
+2. Agent will try again on next poll
+
+## 🎯 Suggested Evolutions
+
+Try these in order:
+
+1. `add logging to agent.log file` - Simple, tests the flow
+2. `track version number in output` - Adds self-awareness
+3. `create tests/ directory with pytest` - Build test suite
+4. `add error handling with retry logic` - Improve robustness
+5. `create helpers.py and refactor` - Modular architecture
+6. `add cost tracking for API calls` - Monitor expenses
+7. `implement rate limiting` - Prevent API overuse
+
+## 🔒 Security
+
+### ⚠️ CRITICAL: Run in Isolation
+
+**DO NOT run this on your main development machine.**
+
+The agent executes arbitrary bash scripts generated by GPT-4o. While the PR review provides human-in-the-loop safety, you should run this in an isolated environment.
+
+### Recommended Setups
+
+**Option 1: Docker (Recommended)**
+```bash
+docker run -it \
+  --rm \
+  --cpus=1 \
+  --memory=1g \
+  -v $(pwd):/app \
+  -w /app \
+  python:3.11-slim \
+  bash -c "pip install -r requirements.txt && python agent.py"
+```
+
+**Option 2: AWS EC2 Spot Instance**
+```bash
+# Launch t3.micro spot (~$0.01/hour)
+# SSH in, clone repo, run agent
+# Terminate when done
+```
+
+**Option 3: Local VM**
+```bash
+# VirtualBox/UTM with Ubuntu
+# Network mode: NAT (outbound only)
+# Snapshot before running
+```
+
+### Security Checklist
+
+Before running:
+- [ ] Running in isolated environment (not main laptop)
+- [ ] Dedicated GitHub token (can revoke easily)
+- [ ] OpenAI spending limit set ($50-100)
+- [ ] Git configured (user.name and user.email)
+- [ ] Ready to monitor resource usage
+- [ ] Know how to emergency stop
+
+### What to Watch For
+
+Stop immediately if you see:
+- Evolution scripts with `rm -rf` or destructive commands
+- Network calls to unknown domains
+- Attempts to modify `.gitignore` or `.env`
+- API costs spiking unexpectedly
+- Credential exposure in git commits
+
+## 🐛 Troubleshooting
+
+### Agent not starting
+
+```bash
+# Test the agent
+python agent.py --test
+# Should output: OK
+
+# Check environment
+cat .env
+# Verify all three variables are set
+```
+
+### Issues not detected
+
+- Wait 30 seconds (agent polls every 30s)
+- Verify issue has `agent-task` label (case-sensitive)
+- Check `REPO` in `.env` matches your fork exactly
+
+### PR creation fails
+
+```bash
+# Configure git
+git config user.name "Your Name"
+git config user.email "you@example.com"
+
+# Verify GitHub token has 'repo' scope
+# Create new token if needed
+```
+
+### Evolution script fails
+
+- Check `evolve_vN.sh` for errors
+- Review agent output for error messages
+- Try adding `agent-retry` label to retry
+
+## 📂 Repository Structure
+
+After a few evolutions:
+
+```
+agent-seed/
+├── agent.py              # Current version (seed)
+├── agent_v1.py           # First evolution
+├── agent_v2.py           # Second evolution
+├── evolve_v1.sh          # Script that created v1
+├── evolve_v2.sh          # Script that created v2
+├── SYSTEM_PROMPT.md      # Instructions for GPT-4o
+├── README.md             # This file
+├── requirements.txt      # Dependencies
+├── .env                  # Your secrets (gitignored)
+├── .env.example          # Template
+└── .gitignore            # Ignores secrets
+```
+
+## 🔬 Research Questions
+
+This experiment explores:
+- How many iterations before the agent breaks itself?
+- What types of tasks succeed vs fail?
+- Does code quality improve or degrade over time?
+- What capabilities emerge without explicit programming?
+- Can human-in-loop (PRs) constrain autonomous systems?
+
+## 📝 License
+
+MIT License - fork freely and evolve your own version!
+
+## 🤝 Contributing
+
+Found a bug in the **seed** (this initial version)? Open an issue or PR!
+
+For your agent's evolution, that belongs in your fork - share interesting patterns in Discussions instead.
+
+## 📞 Support
+
+- **Setup issues**: Check Troubleshooting section above
+- **Bug in seed**: Open an issue
+- **Evolution questions**: Start a Discussion
+- **Security concerns**: See Security section
+
+---
+
+**Ready to evolve?** Create your first `agent-task` issue and watch it grow! 🌱→🌿→🌳
