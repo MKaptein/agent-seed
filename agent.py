@@ -28,6 +28,7 @@ import os
 import sys
 import subprocess
 import time
+import re
 import requests
 from typing import Optional, Dict
 from openai import OpenAI
@@ -55,6 +56,29 @@ load_environment()
 API_KEY = os.environ.get("OPENAI_API_KEY")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO = os.environ.get("REPO")
+
+
+def get_next_version() -> int:
+    """Scan directory for existing agent versions, return next number.
+    
+    Looks for files matching pattern agent_v*.py and returns the next
+    version number. For example, if agent_v1.py and agent_v2.py exist,
+    returns 3.
+    
+    Returns:
+        Next version number (integer starting at 1)
+    """
+    existing = [f for f in os.listdir('.') if f.startswith('agent_v') and f.endswith('.py')]
+    if not existing:
+        return 1
+    
+    versions = []
+    for filename in existing:
+        match = re.search(r'agent_v(\d+)\.py', filename)
+        if match:
+            versions.append(int(match.group(1)))
+    
+    return max(versions) + 1 if versions else 1
 
 
 def github_api(method: str, path: str, json_data: Optional[Dict] = None) -> requests.Response:
@@ -107,6 +131,7 @@ def generate_evolution_script(task: str, previous_attempt: Optional[Dict] = None
         Exception: If API call fails or returns invalid response
     """
     current_code = read_own_code()
+    current_filename = os.path.basename(__file__)
     
     # Load system prompt that instructs the LLM
     system_prompt = ""
@@ -121,6 +146,7 @@ def generate_evolution_script(task: str, previous_attempt: Optional[Dict] = None
     
     # Base request
     user_message = (
+        f"Current agent filename: {current_filename}\n"
         f"Current agent code:\n```python\n{current_code}\n```\n\n"
         f"Task: {task}\n\n"
     )
@@ -136,7 +162,8 @@ def generate_evolution_script(task: str, previous_attempt: Optional[Dict] = None
     else:
         user_message += (
             f"Generate a bash script that creates agent_vN.py with the "
-            f"modifications needed to accomplish this task."
+            f"modifications needed to accomplish this task. Remember to copy "
+            f"from {current_filename} (the current agent), not from hardcoded 'agent.py'."
         )
     
     messages.append({"role": "user", "content": user_message})
@@ -178,10 +205,12 @@ def create_new_version(evolution_script: str, version: int) -> str:
         Exception: If script execution fails
     """
     script_filename = f"evolve_v{version}.sh"
+    current_filename = os.path.basename(__file__)
     
-    # Substitute version placeholders in script
+    # Substitute version placeholders and current filename in script
     script_with_version = evolution_script.replace("agent_vN.py", f"agent_v{version}.py")
     script_with_version = script_with_version.replace("vN", f"v{version}")
+    script_with_version = script_with_version.replace("CURRENT_AGENT", current_filename)
     
     # Write evolution script to file
     with open(script_filename, "w", encoding="utf-8") as script_file:
@@ -243,6 +272,10 @@ def create_pull_request(version: int, task: str, branch_name: str) -> None:
     Raises:
         subprocess.CalledProcessError: If git commands fail
     """
+    # Ensure we're on main branch and up to date
+    subprocess.run(["git", "checkout", "main"], check=True)
+    subprocess.run(["git", "pull"], check=True)
+    
     # Create and checkout new branch
     subprocess.run(["git", "checkout", "-b", branch_name], check=True)
     
@@ -274,6 +307,9 @@ def create_pull_request(version: int, task: str, branch_name: str) -> None:
         "base": "main"
     }
     github_api("POST", "/pulls", pr_data)
+    
+    # Return to main branch
+    subprocess.run(["git", "checkout", "main"], check=True)
 
 
 def main() -> None:
@@ -301,12 +337,14 @@ def main() -> None:
         print("  REPO=username/repo-name")
         sys.exit(1)
     
-    version = 1
     print(f"🤖 Agent monitoring {REPO} for 'agent-task' issues...")
     print("Press Ctrl+C to stop\n")
     
     while True:
         try:
+            # Get next version number
+            version = get_next_version()
+            
             # Fetch open issues labeled 'agent-task'
             response = github_api("GET", "/issues?labels=agent-task&state=open")
             issues = response.json()
